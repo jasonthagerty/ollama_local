@@ -56,15 +56,15 @@ services:
             - OLLAMA_HOST=0.0.0.0:11434
             - OLLAMA_ORIGINS=*
             - OLLAMA_GPU_LAYERS=999
-            - OLLAMA_NUM_PARALLEL=2
+            - OLLAMA_NUM_PARALLEL=1
             - OLLAMA_MAX_LOADED_MODELS=1
             - OLLAMA_KEEP_ALIVE=5m
             - OLLAMA_FLASH_ATTENTION=1
-            - OLLAMA_KV_CACHE_TYPE=q8_0
+            - OLLAMA_KV_CACHE_TYPE=q4_0
 
             # IPEX-LLM optimizations
             - IPEX_LLM_LOW_MEM=1
-            - IPEX_LLM_NUM_CTX=16384
+            - IPEX_LLM_NUM_CTX=8192
 
             # Debugging and monitoring
             - OLLAMA_DEBUG=false
@@ -79,6 +79,7 @@ services:
             - ollama_models:/root/.ollama
             - ollama_data:/llm/data
             - sycl_cache:/tmp/sycl_cache
+            - ./models:/llm/models:ro
             # Optional: mount host directories for development
             # - ./scripts:/llm/scripts:ro
             # - ./data:/llm/data
@@ -87,9 +88,9 @@ services:
         deploy:
             resources:
                 limits:
-                    memory: 32G
+                    memory: 24G
                 reservations:
-                    memory: 16G
+                    memory: 12G
 
         # Security settings
         security_opt:
