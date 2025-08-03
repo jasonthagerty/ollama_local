@@ -1,0 +1,231 @@
+services:
+    ollama-arc-optimized:
+        build:
+            context: .
+            dockerfile: Dockerfile
+        container_name: ollama-arc-optimized
+        restart: unless-stopped
+
+        # GPU and device access
+        devices:
+            #- /dev/dri/card0:/dev/dri/card0
+            - /dev/dri/card1:/dev/dri/card1
+            #- /dev/dri/renderD128:/dev/dri/renderD128
+            - /dev/dri/renderD129:/dev/dri/renderD129
+
+        # Enhanced environment variables for Intel Arc A770
+        environment:
+            # Core Intel GPU settings
+            - INTEL_GPU=1
+            - OLLAMA_INTEL_GPU=true
+            - DEVICE=Arc
+            - INTEL_DEVICE_TARGET=arc
+            - DRI_PRIME=1
+            - OLLAMA_GPU_DEVICE=/dev/dri/renderD129
+
+            # Intel Arc A770 specific - device 0 (first Level Zero device)
+            - ONEAPI_DEVICE_SELECTOR=level_zero:0
+            - SYCL_DEVICE_FILTER=level_zero:gpu
+
+            # Level Zero optimizations
+            - ZES_ENABLE_SYSMAN=1
+            - ZE_ENABLE_PCI_ID_DEVICE_ORDER=1
+            - ZE_FLAT_DEVICE_HIERARCHY=COMPOSITE
+            - ZE_ENABLE_VALIDATION_LAYER=0
+            - ZE_ENABLE_PARAMETER_VALIDATION=0
+
+            # SYCL performance optimizations
+            - SYCL_CACHE_PERSISTENT=1
+            - SYCL_CACHE_DIR=/tmp/sycl_cache
+            - SYCL_PI_LEVEL_ZERO_USE_IMMEDIATE_COMMANDLISTS=1
+            - SYCL_PI_LEVEL_ZERO_DEVICE_SCOPE_EVENTS=1
+            - SYCL_PI_LEVEL_ZERO_USE_COPY_ENGINE=1
+
+            # Intel Compute Runtime optimizations
+            - INTEL_COMPUTE_RUNTIME_OCL_DEBUG=0
+            - INTEL_COMPUTE_RUNTIME_L0_DEBUG=0
+            - INTEL_COMPUTE_RUNTIME_ENABLE_KERNEL_DEBUG=0
+            - NEO_DISABLE_MITIGATIONS=1
+            - NEO_ENABLE_INDIRECT_ACCESS_DETECTION=0
+
+            # OpenCL optimizations
+            - CL_CONFIG_CPU_FORCE_PRIVATE_MEM_SIZE=16MB
+            - CL_CONFIG_USE_VECTORIZER=true
+
+            # Ollama configuration
+            - OLLAMA_HOST=0.0.0.0:11434
+            - OLLAMA_ORIGINS=*
+            - OLLAMA_GPU_LAYERS=999
+            - OLLAMA_NUM_PARALLEL=2
+            - OLLAMA_MAX_LOADED_MODELS=1
+            - OLLAMA_KEEP_ALIVE=5m
+            - OLLAMA_FLASH_ATTENTION=1
+            - OLLAMA_KV_CACHE_TYPE=q8_0
+
+            # IPEX-LLM optimizations
+            - IPEX_LLM_LOW_MEM=1
+            - IPEX_LLM_NUM_CTX=16384
+
+            # Debugging and monitoring
+            - OLLAMA_DEBUG=false
+            - OLLAMA_VERBOSE=false
+
+        # Port mapping
+        ports:
+            - "11434:11434"
+
+        # Volume mounts for persistence
+        volumes:
+            - ollama_models:/root/.ollama
+            - ollama_data:/llm/data
+            - sycl_cache:/tmp/sycl_cache
+            # Optional: mount host directories for development
+            # - ./scripts:/llm/scripts:ro
+            # - ./data:/llm/data
+
+        # Resource limits optimized for Intel Arc A770
+        deploy:
+            resources:
+                limits:
+                    memory: 32G
+                reservations:
+                    memory: 16G
+
+        # Security settings
+        security_opt:
+            - seccomp:unconfined
+
+        # Privileged access for GPU (required for Intel Arc)
+        privileged: false
+
+        # User and group for proper permissions
+        user: "0:0" # root for GPU access
+
+        # Health check
+        healthcheck:
+            test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+            interval: 30s
+            timeout: 10s
+            retries: 3
+            start_period: 120s
+
+        # Logging configuration
+        logging:
+            driver: "json-file"
+            options:
+                max-size: "10m"
+                max-file: "3"
+
+        # Network configuration
+        networks:
+            - ollama-network
+
+    # Optional: Open WebUI for enhanced chat interface
+    ollama-webui-enhanced:
+        image: ghcr.io/open-webui/open-webui:main
+        container_name: ollama-webui-enhanced
+        restart: unless-stopped
+
+        environment:
+            - OLLAMA_BASE_URL=http://ollama-arc-optimized:11434
+            - WEBUI_SECRET_KEY=your-secret-key-here
+            - WEBUI_AUTH=false
+
+        ports:
+            - "3000:8080"
+
+        volumes:
+            - open_webui_data:/app/backend/data
+
+        depends_on:
+            - ollama-arc-optimized
+
+        networks:
+            - ollama-network
+
+        healthcheck:
+            test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+            interval: 30s
+            timeout: 10s
+            retries: 3
+
+    # Optional: Performance monitoring container
+    gpu-monitor:
+        build:
+            context: .
+            dockerfile: Dockerfile
+        container_name: gpu-monitor
+        restart: unless-stopped
+
+        # Same device access as main container
+        devices:
+            - /dev/dri/card0:/dev/dri/card0
+            - /dev/dri/card1:/dev/dri/card1
+            - /dev/dri/renderD128:/dev/dri/renderD128
+            - /dev/dri/renderD129:/dev/dri/renderD129
+
+        environment:
+            - INTEL_GPU=1
+            - ONEAPI_DEVICE_SELECTOR=level_zero:0
+
+        command: >
+            bash -c "
+              echo 'GPU Performance Monitor Started';
+              while true; do
+                echo '=== $(date) ===';
+                echo 'GPU Utilization:';
+                timeout 5s intel_gpu_top -l 2>/dev/null | head -10 || echo 'GPU monitoring not available';
+                echo '';
+                echo 'Ollama Container Stats:';
+                curl -s http://ollama-arc-optimized:11434/api/ps 2>/dev/null | jq '.' || echo 'Ollama not responding';
+                echo '';
+                sleep 30;
+              done
+            "
+
+        depends_on:
+            - ollama-arc-optimized
+
+        networks:
+            - ollama-network
+
+        profiles:
+            - monitoring
+
+# Named volumes for data persistence
+volumes:
+    ollama_models:
+        driver: local
+        driver_opts:
+            type: none
+            o: bind
+            device: ./data/models
+
+    ollama_data:
+        driver: local
+        driver_opts:
+            type: none
+            o: bind
+            device: ./data/contexts
+
+    sycl_cache:
+        driver: local
+        driver_opts:
+            type: none
+            o: bind
+            device: ./data/sycl_cache
+
+    open_webui_data:
+        driver: local
+        driver_opts:
+            type: none
+            o: bind
+            device: ./data/webui
+
+# Custom network for service communication
+networks:
+    ollama-network:
+        driver: bridge
+        ipam:
+            config:
+                - subnet: 172.20.0.0/16

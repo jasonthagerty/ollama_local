@@ -1,0 +1,67 @@
+# Git files
+.git
+.gitignore
+
+# Documentation
+README.md
+*.md
+
+# Environment and configuration
+.env*
+docker-compose*.yml
+
+# Scripts
+setup.sh
+manage.sh
+*.sh
+
+# Data directories
+data/
+backups/
+logs/
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Node modules (if any)
+node_modules/
+npm-debug.log*
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Build artifacts
+*.o
+*.so
+*.dylib
+*.exe
+*.dll
+
+# Archives
+*.zip
+*.tar.gz
+*.rar
+
+# Local configuration
+config.local.*
+secrets/
