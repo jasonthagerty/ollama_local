@@ -86,6 +86,7 @@ usage() {
     echo "  gpu                  Show Arc GPU information and diagnostics"
     echo "  gpu-monitor          Start real-time GPU monitoring"
     echo "  gpu-test             Test Intel IPEX-LLM and Arc GPU setup"
+    echo "  memory-monitor       Monitor GPU memory and VRAM usage"
     echo ""
     echo "Model Management:"
     echo "  models               List installed models"
@@ -110,6 +111,7 @@ usage() {
     echo ""
     echo "Monitoring:"
     echo "  monitor              Monitor GPU and container stats"
+    echo "  memory-monitor       Advanced GPU memory monitoring"
     echo "  test                 Test API connectivity"
     echo "  health               Check service health"
     echo ""
@@ -119,6 +121,7 @@ usage() {
     echo "  $0 pull qwen2.5:0.5b           # Pull a small model for testing"
     echo "  $0 chat qwen2.5:0.5b           # Chat with model on Arc GPU"
     echo "  $0 gpu-monitor                 # Monitor GPU during inference"
+    echo "  $0 memory-monitor              # Track memory usage and VRAM"
     echo "  $0 logs ollama                 # View Ollama logs"
     echo "  $0 export-context my-session   # Export conversation context"
     echo "  $0 backup                      # Backup models and data"
@@ -250,6 +253,7 @@ quick_start() {
     echo "  • API: http://localhost:11434"
     echo "  • Test chat: $0 chat qwen2.5:0.5b"
     echo "  • GPU monitoring: $0 gpu-monitor"
+    echo "  • Memory monitoring: $0 memory-monitor"
     echo "  • Full GPU test: $0 gpu-test"
 }
 
@@ -825,12 +829,43 @@ monitor_system() {
             echo "intel_gpu_top not available"
         fi
 
+        # Memory and VRAM warnings
+        echo -e "\n${BLUE}Memory & VRAM Status:${NC}"
+        local vram_warnings=$(docker logs --since=1m $CONTAINER_NAME 2>&1 | grep -i "vram.*timeout\|gpu.*recover" | wc -l)
+        if [ "$vram_warnings" -gt 0 ]; then
+            echo -e "${RED}⚠️  VRAM warnings in last minute: $vram_warnings${NC}"
+        else
+            echo -e "${GREEN}✅ No recent VRAM warnings${NC}"
+        fi
+
         # System load
         echo -e "\n${BLUE}System Load:${NC}"
         uptime
 
         sleep 5
     done
+}
+
+# Advanced memory monitoring
+memory_monitor() {
+    print_header "🧠 Advanced GPU Memory Monitor"
+
+    if [ ! -f "./scripts/monitor-gpu-memory.sh" ]; then
+        print_error "Memory monitoring script not found"
+        print_status "Creating memory monitoring script..."
+        return 1
+    fi
+
+    print_status "Starting advanced memory monitoring..."
+    print_status "This will track GPU memory, VRAM warnings, and container health"
+    print_status "Press Ctrl+C to stop"
+    echo ""
+
+    # Make sure script is executable
+    chmod +x ./scripts/monitor-gpu-memory.sh
+
+    # Run the memory monitor
+    ./scripts/monitor-gpu-memory.sh --container "$CONTAINER_NAME"
 }
 
 # Test API connectivity
@@ -1068,6 +1103,9 @@ print(f'  SYCL_DEVICE_FILTER: {os.getenv(\"SYCL_DEVICE_FILTER\", \"not set\")}')
             ;;
         monitor)
             monitor_system
+            ;;
+        memory-monitor)
+            memory_monitor
             ;;
         test)
             test_api
