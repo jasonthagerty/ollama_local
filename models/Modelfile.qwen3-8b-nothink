@@ -1,12 +1,14 @@
 FROM qwen3:8b
 
+# Context limit: qwen3:8b has 36 layers vs llama3.1's 32, making its KV cache
+# ~12% larger per token. At the global 32k context × 2 parallel slots, total VRAM
+# requirement (~19GB) exceeds the Arc A770's 16GB, forcing CPU fallback.
+# 16k context keeps total memory under 16GB and restores GPU inference.
+# 16384 tokens is sufficient for all expected ha_boss and opn_boss workloads.
+PARAMETER num_ctx 16384
+
 # Disable chain-of-thought reasoning by default via system prompt.
-# qwen3:8b is a reasoning model that generates <think>...</think> tokens before
-# responding, which roughly halves visible token throughput (~8 tok/s vs ~16 tok/s)
-# and adds latency for tasks that don't need deep reasoning.
-#
 # PARAMETER think false requires Ollama >0.18.3 and is not supported by this build.
-# The /no_think system prompt is the equivalent mechanism for older Ollama versions.
-#
+# /no_think instructs the model to skip chain-of-thought (fine-tuning-level instruction).
 # Per-request override: append /think or /no_think to any prompt.
 SYSTEM /no_think
