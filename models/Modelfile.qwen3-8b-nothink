@@ -1,0 +1,10 @@
+FROM qwen3:8b
+
+# Disable chain-of-thought reasoning by default.
+# qwen3:8b is a reasoning model that generates <think>...</think> tokens before
+# responding, which roughly halves visible token throughput (~8 tok/s vs ~16 tok/s)
+# and adds latency for tasks that don't need deep reasoning.
+#
+# With think=false, the model responds directly without generating thinking tokens.
+# Per-request override: append /think or /no_think to any prompt.
+PARAMETER think false

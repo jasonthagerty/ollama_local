@@ -1,0 +1,8 @@
+# Extends ollama-arc-sycl:3.3.4 (built from eleiton/ollama-intel-arc) to add
+# libsycl-native-bfloat16.spv, which is required for inference but was not
+# included in the upstream build's COPY step.
+FROM intel/oneapi-basekit:2025.2.2-0-devel-ubuntu24.04 AS spv-source
+
+FROM ollama-arc-sycl:3.3.4
+COPY --from=spv-source /opt/intel/oneapi/compiler/latest/lib/libsycl-native-bfloat16.spv \
+    /usr/lib/ollama/sycl/libsycl-native-bfloat16.spv

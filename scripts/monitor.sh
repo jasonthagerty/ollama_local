@@ -1,12 +1,14 @@
 #!/bin/bash
 
-# Ollama Intel Arc A770 Monitoring Script
-# Monitors container memory, GPU usage, and model status
+# Ollama Monitoring Script (Intel Arc A770 / SYCL)
+# Monitors container memory, GPU performance, and model status
 
 set -e
 
-# Configuration
-CONTAINER_NAME="ollama-arc-optimized"
+# Configuration — source .env for container name if available
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+[ -f "$SCRIPT_DIR/../.env" ] && source "$SCRIPT_DIR/../.env"
+CONTAINER_NAME="${CONTAINER_NAME:-ollama-arc-sycl}"
 OLLAMA_HOST="http://localhost:11434"
 REFRESH_INTERVAL=5
 LOG_FILE="logs/monitor.log"
@@ -69,8 +71,8 @@ get_container_stats() {
     fi
 }
 
-# Function to get container memory in bytes for calculations
-get_container_memory_bytes() {
+# Function to get container memory in GB for calculations
+get_container_memory_gb() {
     if check_container; then
         docker stats --no-stream --format "{{.MemUsage}}" "$CONTAINER_NAME" | sed 's/[^0-9.]*\([0-9.]*\).*/\1/'
     else
@@ -80,7 +82,7 @@ get_container_memory_bytes() {
 
 # Function to check Ollama API status
 check_ollama_api() {
-    if curl -s "$OLLAMA_HOST/api/version" >/dev/null 2>&1; then
+    if curl -s "$OLLAMA_HOST/api/tags" >/dev/null 2>&1; then
         return 0
     else
         return 1
@@ -90,17 +92,36 @@ check_ollama_api() {
 # Function to get loaded models
 get_loaded_models() {
     if check_ollama_api; then
-        curl -s "$OLLAMA_HOST/api/ps" 2>/dev/null | jq -r '.models[]? | "\(.name) (\((.size_vram/1024/1024/1024*10|floor)/10)GB VRAM, \(.context_length) ctx)"' 2>/dev/null || echo "None"
+        curl -s "$OLLAMA_HOST/api/ps" 2>/dev/null | python3 -c "
+import json, sys
+try:
+    data = json.load(sys.stdin)
+    models = data.get('models', [])
+    if models:
+        for model in models:
+            name = model.get('name', 'unknown')
+            size = model.get('size', 0)
+            size_gb = round(size / (1024**3), 1)
+            print(f'  • {name} ({size_gb}GB)')
+    else:
+        print('None')
+except:
+    print('None')
+" 2>/dev/null || echo "None"
     else
         echo "API not available"
     fi
 }
 
-# Function to get GPU utilization (if available)
-get_gpu_usage() {
+# Function to get SYCL/Level Zero device information
+get_sycl_devices() {
     if check_container; then
-        # Try to get Intel GPU stats from inside container
-        docker exec "$CONTAINER_NAME" timeout 3s intel_gpu_top -l 2>/dev/null | grep -E "Render/3D|VideoCodec|Blitter" | head -3 2>/dev/null || echo "GPU stats unavailable"
+        docker exec "$CONTAINER_NAME" bash -c "
+echo 'DRI devices:'
+ls /dev/dri/ 2>/dev/null || echo '  none'
+echo 'SYCL devices:'
+sycl-ls 2>/dev/null || echo '  sycl-ls not available'
+" 2>/dev/null || echo "GPU device info unavailable"
     else
         echo "Container not running"
     fi
@@ -108,20 +129,22 @@ get_gpu_usage() {
 
 # Function to check for memory warnings
 check_memory_warnings() {
-    local memory_usage=$(get_container_memory_bytes)
-    local memory_gb=$(echo "$memory_usage" | awk '{printf "%.1f", $1}')
+    local memory_usage=$(get_container_memory_gb)
 
-    if (( $(echo "$memory_gb > 18.0" | bc -l) )); then
-        print_error "HIGH MEMORY USAGE: ${memory_gb}GB - Risk of OOM kill!"
-        log_message "HIGH MEMORY WARNING: ${memory_gb}GB"
-        return 1
-    elif (( $(echo "$memory_gb > 15.0" | bc -l) )); then
-        print_warning "Elevated memory usage: ${memory_gb}GB"
-        log_message "ELEVATED MEMORY: ${memory_gb}GB"
-        return 2
+    if command -v bc >/dev/null; then
+        if (( $(echo "$memory_usage > 12.0" | bc -l) )); then
+            print_error "HIGH MEMORY USAGE: ${memory_usage}GB - Risk of OOM kill!"
+            log_message "HIGH MEMORY WARNING: ${memory_usage}GB"
+            return 1
+        elif (( $(echo "$memory_usage > 8.0" | bc -l) )); then
+            print_warning "Elevated memory usage: ${memory_usage}GB"
+            log_message "ELEVATED MEMORY: ${memory_usage}GB"
+            return 2
+        fi
     else
-        return 0
+        print_info "Memory usage: ${memory_usage}GB (bc not available for threshold checking)"
     fi
+    return 0
 }
 
 # Function to get recent logs for errors
@@ -147,11 +170,13 @@ show_system_info() {
     local avail_mem=$(free -h | awk '/^Mem:/ {print $7}')
     print_info "Host Memory: $used_mem / $total_mem used ($avail_mem available)"
 
-    # GPU info
-    if lspci | grep -i "vga\|display" | grep -i intel >/dev/null 2>&1; then
-        local gpu_info=$(lspci | grep -i "vga\|display" | grep -i intel | head -1 | cut -d: -f3)
-        print_info "GPU:$gpu_info"
-    fi
+    # CPU info
+    local cpu_info=$(grep 'model name' /proc/cpuinfo | head -1 | cut -d: -f2 | xargs)
+    print_info "CPU: $cpu_info"
+
+    # Disk space
+    local disk_info=$(df -h . | tail -1 | awk '{print $4 " available (" $5 " used)"}')
+    print_info "Disk: $disk_info"
 
     echo
 }
@@ -173,7 +198,7 @@ show_container_status() {
         print_info "Uptime: $uptime"
     else
         print_error "Container: Not running"
-        print_info "Start with: docker-compose up -d"
+        print_info "Start with: ./manage.sh start"
         return 1
     fi
 
@@ -185,19 +210,28 @@ show_ollama_status() {
     print_header "=== Ollama Service Status ==="
 
     if check_ollama_api; then
-        local version=$(curl -s "$OLLAMA_HOST/api/version" | jq -r '.version' 2>/dev/null || echo "unknown")
-        print_status "API: Responding (v$version)"
+        print_status "API: Responding"
 
         # Show loaded models
         local models=$(get_loaded_models)
         if [[ "$models" != "None" ]]; then
             print_info "Loaded models:"
-            echo "$models" | while read -r model; do
-                echo "  • $model"
-            done
+            echo "$models"
         else
             print_info "No models currently loaded"
         fi
+
+        # Show available models
+        local available_count=$(curl -s "$OLLAMA_HOST/api/tags" | python3 -c "
+import json, sys
+try:
+    data = json.load(sys.stdin)
+    models = data.get('models', [])
+    print(len(models))
+except:
+    print(0)
+" 2>/dev/null || echo "0")
+        print_info "Available models: $available_count"
     else
         print_error "API: Not responding"
         print_info "Check container logs: docker logs $CONTAINER_NAME"
@@ -206,21 +240,16 @@ show_ollama_status() {
     echo
 }
 
-# Function to display GPU status
+# Function to display GPU/SYCL status
 show_gpu_status() {
-    print_header "=== GPU Status ==="
+    print_header "=== GPU / SYCL Status ==="
 
     if check_container; then
-        print_info "Attempting to get GPU utilization..."
-        local gpu_stats=$(get_gpu_usage)
-        if [[ "$gpu_stats" != "GPU stats unavailable" ]]; then
-            echo "$gpu_stats"
-        else
-            print_warning "GPU monitoring tools not available in container"
-            print_info "This is normal if intel_gpu_top is not installed"
-        fi
+        print_info "Ollama version: $(docker exec "$CONTAINER_NAME" ollama --version 2>/dev/null || echo 'unknown')"
+        print_info "Checking SYCL/Level Zero devices..."
+        get_sycl_devices
     else
-        print_error "Cannot check GPU - container not running"
+        print_error "Cannot check GPU — container not running"
     fi
 
     echo
@@ -237,7 +266,7 @@ monitor_continuous() {
 
     while true; do
         clear
-        echo "=== Ollama Intel Arc A770 Monitor - $(timestamp) ==="
+        echo "=== Ollama SYCL Monitor - $(timestamp) ==="
         echo
 
         show_container_status
@@ -248,8 +277,16 @@ monitor_continuous() {
 
         # Log current status
         if check_container; then
-            local memory_usage=$(get_container_memory_bytes)
-            log_message "Memory: ${memory_usage}GB, Models: $(get_loaded_models | wc -l)"
+            local memory_usage=$(get_container_memory_gb)
+            local model_count=$(curl -s "$OLLAMA_HOST/api/ps" 2>/dev/null | python3 -c "
+import json, sys
+try:
+    data = json.load(sys.stdin)
+    print(len(data.get('models', [])))
+except:
+    print(0)
+" 2>/dev/null || echo "0")
+            log_message "Memory: ${memory_usage}GB, Loaded models: $model_count"
         fi
 
         print_info "Next refresh in ${REFRESH_INTERVAL}s..."
@@ -259,7 +296,7 @@ monitor_continuous() {
 
 # Function to show help
 show_help() {
-    echo "Ollama Intel Arc A770 Monitoring Script"
+    echo "Ollama SYCL Monitoring Script"
     echo
     echo "Usage: $0 [OPTIONS]"
     echo
@@ -271,6 +308,7 @@ show_help() {
     echo "  -m, --memory        Show memory usage only"
     echo "  -l, --logs          Show recent container logs"
     echo "  -e, --errors        Check for recent errors"
+    echo "  -v, --gpu           Show GPU/SYCL status"
     echo "  -i, --interval SEC  Set refresh interval (default: ${REFRESH_INTERVAL}s)"
     echo
     echo "Examples:"
@@ -278,6 +316,7 @@ show_help() {
     echo "  $0 -o               # Show status once"
     echo "  $0 -i 10            # Monitor with 10s refresh"
     echo "  $0 --memory         # Show memory usage only"
+    echo "  $0 --gpu            # Show GPU/SYCL status"
 }
 
 # Function for one-time status check
@@ -298,7 +337,8 @@ show_memory_only() {
 
         if check_ollama_api; then
             local models=$(get_loaded_models)
-            echo "Loaded Models: $models"
+            echo "Loaded Models:"
+            echo "$models"
         fi
     else
         echo "Container not running"
@@ -348,6 +388,10 @@ while [[ $# -gt 0 ]]; do
             MODE="errors"
             shift
             ;;
+        -v|--gpu)
+            MODE="gpu"
+            shift
+            ;;
         -i|--interval)
             REFRESH_INTERVAL="$2"
             shift 2
@@ -376,6 +420,9 @@ case $MODE in
         ;;
     errors)
         check_recent_errors
+        ;;
+    gpu)
+        show_gpu_status
         ;;
     *)
         show_help

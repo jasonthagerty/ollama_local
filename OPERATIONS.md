@@ -1,1125 +1,282 @@
-# Ollama Local - Operations Guide
+# Ollama Local — Operations Guide
 
-Complete operations manual for managing your Intel Arc GPU optimized Ollama deployment.
+Intel Arc A770 · SYCL/Level Zero backend · Ollama v0.18.3
 
-## 📋 Table of Contents
+## Quick Reference
 
-- [Quick Reference](#-quick-reference)
-- [Installation & Setup](#-installation--setup)
-- [Service Management](#-service-management)
-- [GPU Operations](#-gpu-operations)
-- [Model Management](#-model-management)
-- [Monitoring & Diagnostics](#-monitoring--diagnostics)
-- [Maintenance & Updates](#-maintenance--updates)
-- [Performance Tuning](#-performance-tuning)
-- [Backup & Recovery](#-backup--recovery)
-- [Troubleshooting](#-troubleshooting)
-- [Advanced Configuration](#-advanced-configuration)
+```bash
+./manage.sh quick-start        # Build + start + pull all required models
+./manage.sh build              # Build ollama-arc-sycl:3.3.4-fixed image
+./manage.sh start              # Start container
+./manage.sh stop               # Stop container
+./manage.sh restart            # Stop + start
+./manage.sh status             # Container + API status
+./manage.sh health             # Full health check
+
+./manage.sh hardware-test      # Verify SYCL/Level Zero GPU detection
+./manage.sh hardware-info      # Show GPU + CPU info
+
+./manage.sh models             # List installed models
+./manage.sh pull <model>       # Download a model
+./manage.sh pull-models        # Pull llama3.1:8b, phi3:mini, qwen3:8b + create qwen3:8b-nothink
+./manage.sh create-models      # Create custom Modelfile variants (qwen3:8b-nothink)
+./manage.sh chat <model>       # Interactive chat session
+./manage.sh benchmark          # Token/sec benchmark (uses llama3.1:8b)
+
+./manage.sh logs [service]     # Stream logs
+./manage.sh shell              # bash into container
+./manage.sh update             # Pull latest image + rebuild + restart
+./manage.sh cleanup            # Remove stopped containers + unused images
+./manage.sh backup             # Backup config (excludes model weights)
+```
+
+API endpoint: `http://localhost:11434`
 
 ---
 
-## 🚀 Quick Reference
-
-### Essential Commands
-```bash
-# Complete setup from scratch
-./manage.sh quick-start
-
-# Service management
-./manage.sh start           # Start all services
-./manage.sh stop            # Stop all services
-./manage.sh restart         # Restart services
-./manage.sh status          # Show service status
-
-# GPU operations
-./manage.sh gpu-test        # Test GPU acceleration
-./manage.sh gpu-monitor     # Monitor GPU usage
-./manage.sh gpu             # Show GPU info
-
-# Model management
-./manage.sh models          # List models
-./manage.sh pull <model>    # Download model
-./manage.sh chat <model>    # Interactive chat
-
-# Health & diagnostics
-./manage.sh health          # Full health check
-./manage.sh logs [service]  # View logs
-```
-
-### Access Points
-- **Web UI**: http://localhost:3000
-- **API**: http://localhost:11434
-- **Health Check**: http://localhost:11434/api/tags
-
----
-
-## 🛠️ Installation & Setup
-
-### Prerequisites Verification
-
-Before installation, verify your system meets requirements:
+## First-Time Setup
 
 ```bash
-# Check Docker installation
-docker --version
-docker compose version
-
-# Verify Intel Arc GPU
-lspci | grep -i intel
-ls -la /dev/dri/
-
-# Check system resources
-free -h
-df -h
-```
-
-**Required Output:**
-- Docker 24.0+ with Compose V2
-- Intel Arc GPU visible in lspci
-- `/dev/dri/card1` and `/dev/dri/renderD129` devices
-- 16GB+ RAM, 50GB+ free storage
-
-### Initial Setup Methods
-
-#### Method 1: Quick Start (Recommended)
-```bash
-# Clone repository
-git clone <repository-url>
-cd ollama-local
-
-# Complete automated setup
-chmod +x manage.sh
-./manage.sh quick-start
-```
-
-**Expected output:**
-```
-🚀 Quick Start - Complete Ollama Arc GPU Setup
-==================================================================
-[INFO] Step 1/5: Building containers...
-[INFO] Step 2/5: Starting services...
-[INFO] Step 3/5: Testing GPU setup...
-[INFO] Step 4/5: Pulling test model...
-[INFO] Step 5/5: Testing model inference...
-[SUCCESS] 🎉 Quick start completed!
-```
-
-#### Method 2: Manual Setup
-```bash
-# Build containers
+# 1. Build the image (adds missing libsycl-native-bfloat16.spv to upstream build)
 ./manage.sh build
 
-# Start services
+# 2. Start the container
 ./manage.sh start
 
-# Wait for services to be ready
-sleep 30
-
-# Test GPU functionality
-./manage.sh gpu-test
-
-# Pull your first model
-./manage.sh pull qwen2.5:0.5b
+# 3. Pull required models and create qwen3:8b-nothink
+./manage.sh pull-models
 ```
 
-### Post-Installation Verification
-
+Or as a single command:
 ```bash
-# Check service health
-./manage.sh health
-
-# Verify GPU acceleration
-./manage.sh gpu-test
-
-# Test model inference
-./manage.sh chat qwen2.5:0.5b
-```
-
----
-
-## ⚙️ Service Management
-
-### Container Lifecycle
-
-#### Starting Services
-```bash
-# Start all services
-./manage.sh start
-
-# Start specific service
-docker compose up -d ollama-arc-optimized
-docker compose up -d ollama-webui-enhanced
-```
-
-#### Stopping Services
-```bash
-# Stop all services
-./manage.sh stop
-
-# Stop specific service
-docker compose stop ollama-arc-optimized
-docker compose stop ollama-webui-enhanced
-
-# Stop and remove containers
-docker compose down
-```
-
-#### Restarting Services
-```bash
-# Restart all services
-./manage.sh restart
-
-# Restart specific service
-docker compose restart ollama-arc-optimized
-```
-
-### Service Status Monitoring
-
-#### Check Service Status
-```bash
-# Comprehensive status
-./manage.sh status
-
-# Docker compose status
-docker compose ps
-
-# Container health
-docker compose ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
-```
-
-**Expected healthy output:**
-```
-NAME                    STATUS                    PORTS
-ollama-arc-optimized    Up X minutes (healthy)    0.0.0.0:11434->11434/tcp
-ollama-webui-enhanced   Up X minutes (healthy)    0.0.0.0:3000->8080/tcp
-```
-
-#### Resource Usage
-```bash
-# Resource monitoring
-./manage.sh monitor
-
-# Real-time stats
-docker stats ollama-arc-optimized ollama-webui-enhanced
-
-# Memory usage
-docker exec ollama-arc-optimized free -h
-```
-
-### Service Dependencies
-
-**Startup Order:**
-1. ollama-arc-optimized (primary service)
-2. ollama-webui-enhanced (depends on Ollama)
-
-**Health Check Sequence:**
-1. Container startup (10-15 seconds)
-2. GPU initialization (5-10 seconds)
-3. API availability (1-2 seconds)
-4. Model loading (variable)
-
----
-
-## 🎮 GPU Operations
-
-### GPU Status & Diagnostics
-
-#### Basic GPU Information
-```bash
-# Quick GPU info
-./manage.sh gpu
-
-# Comprehensive diagnostics
-./manage.sh gpu-test
-
-# GPU device verification
-docker exec ollama-arc-optimized ls -la /dev/dri/
-```
-
-#### Detailed GPU Diagnostics
-```bash
-# Full GPU diagnostics
-docker exec ollama-arc-optimized /llm/bin/gpu-diagnostics-comprehensive
-
-# Intel GPU stack information
-docker exec ollama-arc-optimized env | grep -E "(INTEL|SYCL|OLLAMA_GPU)"
-
-# OpenCL platform info
-docker exec ollama-arc-optimized clinfo
-```
-
-### GPU Performance Monitoring
-
-#### Real-time GPU Monitoring
-```bash
-# Start GPU monitor
-./manage.sh gpu-monitor
-
-# Intel GPU top (if available)
-docker exec ollama-arc-optimized intel_gpu_top
-
-# Custom monitoring loop
-while true; do
-  echo "=== $(date) ==="
-  docker exec ollama-arc-optimized nvidia-smi || echo "Intel GPU monitoring"
-  sleep 5
-done
-```
-
-#### Performance Metrics
-```bash
-# Check IPEX_LLM configuration
-docker exec ollama-arc-optimized printenv | grep IPEX_LLM
-
-# SYCL cache status
-docker exec ollama-arc-optimized ls -la /tmp/sycl_cache/
-
-# GPU memory usage
-docker exec ollama-arc-optimized cat /sys/class/drm/card1/device/mem_info_vram_used
-```
-
-### GPU Optimization Verification
-
-#### Context Window Configuration
-```bash
-# Verify 16K context setting
-echo "IPEX_LLM_NUM_CTX: $(docker exec ollama-arc-optimized printenv IPEX_LLM_NUM_CTX)"
-
-# Test large context
-docker exec ollama-arc-optimized curl -s -X POST http://localhost:11434/api/generate \
-  -d '{"model":"qwen2.5:0.5b","prompt":"Long context test...","options":{"num_ctx":16384}}'
-```
-
-#### Performance Settings Verification
-```bash
-# Check optimization flags
-docker exec ollama-arc-optimized env | grep -E "(NEO_DISABLE|SYCL_CACHE|OLLAMA_GPU_LAYERS)"
-
-# Expected output:
-# NEO_DISABLE_MITIGATIONS=1
-# SYCL_CACHE_PERSISTENT=1
-# OLLAMA_GPU_LAYERS=999
-```
-
----
-
-## 📚 Model Management
-
-### Model Discovery & Installation
-
-#### Browsing Available Models
-```bash
-# Popular models
-./manage.sh models
-
-# Search for models (manual)
-docker exec ollama-arc-optimized ollama list
-```
-
-**Recommended Models by Size:**
-- **Lightweight (< 1GB)**: qwen2.5:0.5b, tinyllama
-- **Medium (1-5GB)**: llama2:7b, mistral:7b, qwen2.5:7b
-- **Large (5-15GB)**: deepseek-r1:8b, llama2:13b, codellama:13b
-
-#### Installing Models
-```bash
-# Install lightweight model (fast)
-./manage.sh pull qwen2.5:0.5b
-
-# Install medium model
-./manage.sh pull llama2:7b
-
-# Install coding model
-./manage.sh pull codellama:7b
-
-# Monitor download progress
-docker exec ollama-arc-optimized ollama ps
-```
-
-#### Verifying Model Installation
-```bash
-# List installed models
-./manage.sh models
-
-# Test model functionality
-./manage.sh chat qwen2.5:0.5b
-
-# API test
-curl -X POST http://localhost:11434/api/generate \
-  -d '{"model":"qwen2.5:0.5b","prompt":"Hello!","stream":false}'
-```
-
-### Model Configuration & Tuning
-
-#### Custom Model Parameters
-```bash
-# Create custom Modelfile
-cat > Modelfile << EOF
-FROM llama2:7b
-PARAMETER temperature 0.7
-PARAMETER top_p 0.9
-PARAMETER num_ctx 16384
-SYSTEM You are a helpful assistant specialized in technical topics.
-EOF
-
-# Build custom model
-docker exec ollama-arc-optimized ollama create my-assistant -f Modelfile
-```
-
-#### Model Performance Tuning
-```bash
-# Test different context sizes
-for ctx in 4096 8192 16384; do
-  echo "Testing context size: $ctx"
-  time docker exec ollama-arc-optimized curl -s -X POST http://localhost:11434/api/generate \
-    -d "{\"model\":\"qwen2.5:0.5b\",\"prompt\":\"Test\",\"options\":{\"num_ctx\":$ctx}}"
-done
-
-# Benchmark inference speed
-./manage.sh benchmark qwen2.5:0.5b
-```
-
-### Model Lifecycle Management
-
-#### Model Updates
-```bash
-# Update existing model
-./manage.sh pull llama2:7b --force
-
-# Check for updates
-docker exec ollama-arc-optimized ollama list | grep "days ago"
-```
-
-#### Model Removal
-```bash
-# Remove specific model
-./manage.sh remove old-model
-
-# Clean up unused models
-./manage.sh cleanup-models
-
-# Force removal
-docker exec ollama-arc-optimized ollama rm model-name
-```
-
-#### Model Storage Management
-```bash
-# Check storage usage
-./manage.sh storage
-
-# Analyze model sizes
-docker exec ollama-arc-optimized du -sh /root/.ollama/models/*
-
-# Clean cache
-docker exec ollama-arc-optimized rm -rf /tmp/ollama-cache/*
-```
-
----
-
-## 📊 Monitoring & Diagnostics
-
-### Health Monitoring
-
-#### Comprehensive Health Check
-```bash
-# Full system health
-./manage.sh health
-
-# Expected output:
-# ✅ Services Status
-# ✅ Container Health  
-# ✅ GPU Access
-# ✅ API Health
-# ✅ Web UI Health
-```
-
-#### Service-Specific Health
-```bash
-# Ollama service health
-curl -f http://localhost:11434/api/tags
-
-# Web UI health
-curl -f http://localhost:3000/health
-
-# Container health
-docker inspect ollama-arc-optimized --format='{{.State.Health.Status}}'
-```
-
-### Log Management
-
-#### Viewing Logs
-```bash
-# All services logs
-./manage.sh logs
-
-# Specific service logs
-./manage.sh logs ollama
-./manage.sh logs webui
-
-# Real-time log following
-docker compose logs -f ollama-arc-optimized
-
-# Filtered logs
-docker compose logs ollama-arc-optimized | grep -i gpu
-```
-
-#### Log Analysis
-```bash
-# Check for errors
-docker compose logs ollama-arc-optimized | grep -i error
-
-# GPU initialization logs
-docker compose logs ollama-arc-optimized | grep -i "gpu\|intel\|sycl"
-
-# Performance logs
-docker compose logs ollama-arc-optimized | grep -i "inference\|token"
-```
-
-### Performance Monitoring
-
-#### Resource Usage Tracking
-```bash
-# Container resource usage
-docker stats --no-stream ollama-arc-optimized
-
-# System resource usage
-docker exec ollama-arc-optimized top -n 1
-
-# Memory usage breakdown
-docker exec ollama-arc-optimized cat /proc/meminfo | head -10
-```
-
-#### API Performance Monitoring
-```bash
-# Response time testing
-time curl -X POST http://localhost:11434/api/generate \
-  -d '{"model":"qwen2.5:0.5b","prompt":"Performance test","stream":false}'
-
-# Concurrent request testing
-for i in {1..5}; do
-  curl -X POST http://localhost:11434/api/generate \
-    -d '{"model":"qwen2.5:0.5b","prompt":"Test $i","stream":false}' &
-done
-wait
-```
-
-#### GPU Performance Analysis
-```bash
-# SYCL cache hit rate
-ls -la /tmp/sycl_cache/ | wc -l
-
-# GPU memory usage
-cat /sys/class/drm/card1/device/mem_info_vram_total
-cat /sys/class/drm/card1/device/mem_info_vram_used
-
-# Context window utilization
-grep "num_ctx" /var/log/ollama.log
-```
-
----
-
-## 🔧 Maintenance & Updates
-
-### Container Updates
-
-#### Updating Base Images
-```bash
-# Update containers
-./manage.sh update
-
-# Manual update process
-docker compose pull
-docker compose build --no-cache
-docker compose up -d
-```
-
-#### Rolling Updates
-```bash
-# Zero-downtime update
-docker compose build ollama-arc-optimized
-docker compose up -d --no-deps ollama-arc-optimized
-```
-
-### System Maintenance
-
-#### Cleanup Operations
-```bash
-# Clean unused resources
-./manage.sh cleanup
-
-# Clean Docker system
-docker system prune -a
-
-# Clean specific components
-./manage.sh cleanup-models
-./manage.sh cleanup-logs
-```
-
-#### Cache Management
-```bash
-# Clear SYCL cache
-docker exec ollama-arc-optimized rm -rf /tmp/sycl_cache/*
-
-# Clear Ollama cache
-docker exec ollama-arc-optimized rm -rf /tmp/ollama-*
-
-# Rebuild caches
-docker compose restart ollama-arc-optimized
-```
-
-### Configuration Updates
-
-#### Environment Variable Updates
-```bash
-# Edit configuration
-nano .env
-
-# Apply changes
-docker compose down
-docker compose up -d
-
-# Verify changes
-docker exec ollama-arc-optimized printenv | grep IPEX_LLM
-```
-
-#### Service Configuration Updates
-```bash
-# Edit docker-compose.yml
-nano docker-compose.yml
-
-# Validate configuration
-docker compose config
-
-# Apply changes
-docker compose up -d
-```
-
----
-
-## ⚡ Performance Tuning
-
-### GPU Performance Optimization
-
-#### Context Window Tuning
-```bash
-# Test different context sizes
-for size in 4096 8192 16384 32768; do
-  echo "Testing context size: $size"
-  # Update IPEX_LLM_NUM_CTX=$size in .env
-  docker compose restart ollama-arc-optimized
-  # Run performance test
-  time ./manage.sh chat qwen2.5:0.5b "Summarize quantum computing"
-done
-```
-
-#### Memory Optimization
-```bash
-# Enable low memory mode
-echo "IPEX_LLM_LOW_MEM=1" >> .env
-
-# Adjust GPU layers
-echo "OLLAMA_GPU_LAYERS=50" >> .env  # Reduce if memory constrained
-
-# Restart to apply
-docker compose restart ollama-arc-optimized
-```
-
-#### Parallel Processing Tuning
-```bash
-# Adjust parallel requests
-echo "OLLAMA_NUM_PARALLEL=4" >> .env
-
-# Adjust max loaded models
-echo "OLLAMA_MAX_LOADED_MODELS=2" >> .env
-
-# Test concurrent performance
-for i in {1..4}; do
-  ./manage.sh chat qwen2.5:0.5b "Test $i" &
-done
-wait
-```
-
-### System Performance Optimization
-
-#### Resource Allocation
-```bash
-# Increase container memory
-# In docker-compose.yml:
-deploy:
-  resources:
-    limits:
-      memory: 64G
-    reservations:
-      memory: 32G
-```
-
-#### Intel GPU Optimizations
-```bash
-# Verify performance settings
-docker exec ollama-arc-optimized env | grep -E "(NEO_DISABLE|SYCL_PI)"
-
-# Expected optimizations:
-# NEO_DISABLE_MITIGATIONS=1
-# SYCL_PI_LEVEL_ZERO_USE_IMMEDIATE_COMMANDLISTS=1
-# SYCL_PI_LEVEL_ZERO_DEVICE_SCOPE_EVENTS=1
-```
-
-### Benchmarking
-
-#### Performance Benchmarking
-```bash
-# Create benchmark script
-cat > benchmark.sh << 'EOF'
-#!/bin/bash
-MODEL=${1:-qwen2.5:0.5b}
-PROMPT="Explain quantum computing in detail with examples and applications."
-
-echo "Benchmarking model: $MODEL"
-echo "=========================================="
-
-# Warm-up run
-curl -s -X POST http://localhost:11434/api/generate \
-  -d "{\"model\":\"$MODEL\",\"prompt\":\"Hello\"}" > /dev/null
-
-# Benchmark runs
-for i in {1..5}; do
-  echo "Run $i:"
-  time curl -s -X POST http://localhost:11434/api/generate \
-    -d "{\"model\":\"$MODEL\",\"prompt\":\"$PROMPT\",\"stream\":false}" | \
-    jq -r '.response' | wc -w
-  echo ""
-done
-EOF
-
-chmod +x benchmark.sh
-./benchmark.sh qwen2.5:0.5b
-```
-
----
-
-## 💾 Backup & Recovery
-
-### Data Backup
-
-#### Model Backup
-```bash
-# Backup all models
-./manage.sh backup
-
-# Manual model backup
-tar -czf models-backup-$(date +%Y%m%d).tar.gz data/models/
-
-# Backup specific model
-docker exec ollama-arc-optimized ollama export qwen2.5:0.5b > qwen25-backup.gguf
-```
-
-#### Configuration Backup
-```bash
-# Backup configuration files
-tar -czf config-backup-$(date +%Y%m%d).tar.gz \
-  docker-compose.yml .env manage.sh
-
-# Backup volumes
-docker run --rm -v ollama-local_ollama_models:/data \
-  -v $(pwd):/backup alpine tar czf /backup/models-backup.tar.gz /data
-```
-
-#### Complete System Backup
-```bash
-# Export containers
-docker save ollama-local-ollama-arc-optimized:latest | gzip > ollama-image-backup.tar.gz
-
-# Backup all data
-tar -czf ollama-complete-backup-$(date +%Y%m%d).tar.gz \
-  data/ docker-compose.yml .env manage.sh Dockerfile
-```
-
-### Data Recovery
-
-#### Model Recovery
-```bash
-# Restore models from backup
-tar -xzf models-backup-YYYYMMDD.tar.gz
-
-# Import specific model
-docker exec ollama-arc-optimized ollama import qwen25-backup.gguf qwen2.5:0.5b
-```
-
-#### Configuration Recovery
-```bash
-# Restore configuration
-tar -xzf config-backup-YYYYMMDD.tar.gz
-
-# Rebuild with restored config
-docker compose down
-docker compose build --no-cache
-docker compose up -d
-```
-
-#### Disaster Recovery
-```bash
-# Complete system restore
-# 1. Restore image
-docker load < ollama-image-backup.tar.gz
-
-# 2. Restore data
-tar -xzf ollama-complete-backup-YYYYMMDD.tar.gz
-
-# 3. Restart services
-docker compose up -d
-
-# 4. Verify restoration
-./manage.sh health
-```
-
----
-
-## 🔍 Troubleshooting
-
-### Common Issues & Solutions
-
-#### GPU Not Detected
-```bash
-# Check GPU devices
-ls -la /dev/dri/
-lspci | grep -i intel
-
-# Verify container GPU access
-docker exec ollama-arc-optimized ls -la /dev/dri/
-
-# Check Intel drivers
-docker exec ollama-arc-optimized clinfo
-
-# Solutions:
-# 1. Install Intel GPU drivers on host
-# 2. Add user to video/render groups
-# 3. Restart Docker daemon
-```
-
-#### Container Startup Issues
-```bash
-# Check container logs
-docker compose logs ollama-arc-optimized
-
-# Common issues:
-# - Port already in use: Change OLLAMA_PORT in .env
-# - GPU access denied: Fix device permissions
-# - Memory allocation: Reduce memory limits
-
-# Debug container
-docker run -it --entrypoint /bin/bash ollama-local-ollama-arc-optimized
-```
-
-#### Model Loading Failures
-```bash
-# Check available space
-df -h data/models/
-
-# Check model integrity
-docker exec ollama-arc-optimized ollama list
-
-# Re-download corrupted model
-./manage.sh remove problematic-model
-./manage.sh pull problematic-model
-```
-
-#### Performance Issues
-```bash
-# Check GPU utilization
-./manage.sh gpu-monitor
-
-# Check memory usage
-docker stats ollama-arc-optimized
-
-# Common solutions:
-# 1. Reduce OLLAMA_GPU_LAYERS
-# 2. Enable IPEX_LLM_LOW_MEM
-# 3. Reduce context window size
-# 4. Use smaller models
-```
-
-### Diagnostic Commands
-
-#### System Diagnostics
-```bash
-# Complete system check
-./manage.sh health
-
-# GPU diagnostics
-./manage.sh gpu-test
-
-# Network connectivity
-curl -f http://localhost:11434/api/tags
-curl -f http://localhost:3000/health
-
-# Resource availability
-free -h
-df -h
-docker system df
-```
-
-#### Log Analysis
-```bash
-# Error detection
-docker compose logs ollama-arc-optimized | grep -i error | tail -20
-
-# GPU issues
-docker compose logs ollama-arc-optimized | grep -i "gpu\|intel\|sycl" | tail -20
-
-# Performance issues
-docker compose logs ollama-arc-optimized | grep -i "slow\|timeout\|memory" | tail -20
-```
-
-### Emergency Recovery
-
-#### Service Recovery
-```bash
-# Force restart all services
-docker compose down --timeout 0
-docker compose up -d --force-recreate
-
-# Reset to known good state
-git checkout HEAD -- docker-compose.yml .env
-docker compose down
-docker compose build --no-cache
-docker compose up -d
-```
-
-#### Data Recovery
-```bash
-# Restore from last backup
-./manage.sh restore latest-backup.tar.gz
-
-# Reset to clean state (DESTRUCTIVE)
-docker compose down -v
-docker system prune -a
 ./manage.sh quick-start
 ```
 
 ---
 
-## 🔬 Advanced Configuration
+## Service Management
 
-### Custom Model Development
-
-#### Creating Custom Models
 ```bash
-# Create Modelfile
-cat > CustomModel << EOF
-FROM llama2:7b
-PARAMETER temperature 0.8
-PARAMETER top_p 0.9
-PARAMETER num_ctx 16384
-SYSTEM You are an expert AI assistant specializing in technical documentation.
-EOF
-
-# Build custom model
-docker exec ollama-arc-optimized ollama create tech-assistant -f CustomModel
-
-# Test custom model
-./manage.sh chat tech-assistant
-```
-
-#### Model Fine-tuning Preparation
-```bash
-# Export model for fine-tuning
-docker exec ollama-arc-optimized ollama export llama2:7b > base-model.gguf
-
-# Prepare training data
-mkdir -p training-data/
-echo "Your training data here" > training-data/dataset.jsonl
-```
-
-### Integration Development
-
-#### API Integration
-```python
-# Python integration example
-import requests
-import json
-
-class OllamaClient:
-    def __init__(self, base_url="http://localhost:11434"):
-        self.base_url = base_url
-    
-    def generate(self, model, prompt, stream=False):
-        response = requests.post(
-            f"{self.base_url}/api/generate",
-            json={"model": model, "prompt": prompt, "stream": stream}
-        )
-        return response.json()
-    
-    def chat(self, model, messages):
-        response = requests.post(
-            f"{self.base_url}/api/chat",
-            json={"model": model, "messages": messages}
-        )
-        return response.json()
-
-# Usage
-client = OllamaClient()
-response = client.generate("qwen2.5:0.5b", "Hello!")
-print(response['response'])
-```
-
-#### Webhook Integration
-```bash
-# Set up webhook for model completion
-cat > webhook-handler.py << 'EOF'
-from flask import Flask, request
-import requests
-
-app = Flask(__name__)
-
-@app.route('/webhook', methods=['POST'])
-def handle_webhook():
-    data = request.json
-    # Process completion webhook
-    print(f"Model: {data['model']}, Response: {data['response']}")
-    return "OK"
-
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
-EOF
-
-python webhook-handler.py
-```
-
-### Multi-Instance Setup
-
-#### Load Balancing
-```yaml
-# docker-compose-cluster.yml
-version: '3.8'
-services:
-  ollama-1:
-    extends:
-      file: docker-compose.yml
-      service: ollama-arc-optimized
-    ports:
-      - "11434:11434"
-  
-  ollama-2:
-    extends:
-      file: docker-compose.yml
-      service: ollama-arc-optimized
-    ports:
-      - "11435:11434"
-  
-  nginx:
-    image: nginx:alpine
-    ports:
-      - "80:80"
-    volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf
-```
-
-#### High Availability Setup
-```bash
-# Create HA configuration
-cat > nginx.conf << 'EOF'
-upstream ollama {
-    server ollama-1:11434;
-    server ollama-2:11434;
-}
-
-server {
-    listen 80;
-    location / {
-        proxy_pass http://ollama;
-        proxy_set_header Host $host;
-    }
-}
-EOF
-
-# Deploy HA setup
-docker compose -f docker-compose-cluster.yml up -d
-```
-
-### Security Hardening
-
-#### Container Security
-```yaml
-# Enhanced security configuration
-security_opt:
-  - no-new-privileges:true
-  - seccomp:unconfined
-read_only: true
-tmpfs:
-  - /tmp
-  - /var/tmp
-user: "1000:1000"
-```
-
-#### Network Security
-```yaml
-# Restricted network access
-networks:
-  ollama-internal:
-    driver: bridge
-    internal: true
-  ollama-external:
-    driver: bridge
-```
-
-#### Access Control
-```bash
-# Enable Web UI authentication
-echo "WEBUI_AUTH=true" >> .env
-echo "WEBUI_SECRET_KEY=$(openssl rand -hex 32)" >> .env
-
-# Restart to apply
-docker compose restart ollama-webui-enhanced
+./manage.sh start              # Start (creates ./data/ if missing)
+./manage.sh stop               # Stop gracefully
+./manage.sh restart            # Rolling restart
+./manage.sh status             # Quick container + API status
+./manage.sh health             # Detailed health: Docker, container, API, disk
+./manage.sh logs               # Follow all logs
+./manage.sh logs ollama-arc-sycl  # Follow Ollama container logs only
+./manage.sh shell              # Interactive bash in container
 ```
 
 ---
 
-## 📞 Support & Resources
+## Hardware Operations
 
-### Getting Help
+### Verify GPU Access
 
-#### Debug Information Collection
 ```bash
-# Collect system information
-./manage.sh health > debug-info.txt
-docker compose logs > debug-logs.txt
-docker version >> debug-info.txt
-uname -a >> debug-info.txt
-
-# Include in support request
-tar -czf debug-package-$(date +%Y%m%d).tar.gz debug-info.txt debug-logs.txt
+./manage.sh hardware-test
 ```
 
-#### Performance Profiling
+Checks:
+1. `/dev/dri/` device nodes visible in container
+2. `sycl-ls` output — should show `Intel(R) Arc(TM) A770 Graphics`
+3. Quick inference test on available model
+
+### Show Hardware Info
+
 ```bash
-# CPU profiling
-docker exec ollama-arc-optimized top -b -n 1 > cpu-profile.txt
-
-# Memory profiling
-docker exec ollama-arc-optimized cat /proc/meminfo > memory-profile.txt
-
-# GPU profiling
-./manage.sh gpu-monitor > gpu-profile.txt
+./manage.sh hardware-info
 ```
 
-### Best Practices
+Shows CPU, memory, disk, host DRI devices, and SYCL device list from inside the container.
 
-#### Production Deployment
-1. **Resource Planning**: Allocate 2x model size in GPU memory
-2. **Monitoring**: Set up automated health checks
-3. **Backup Strategy**: Daily model backups, weekly full backups
-4. **Security**: Enable authentication, use HTTPS
-5. **Performance**: Monitor response times and resource usage
+### Manual GPU Check
 
-#### Development Workflow
-1. **Testing**: Use small models for development
-2. **Staging**: Test with production-size models
-3. **Deployment**: Use automated deployment scripts
-4. **Monitoring**: Implement comprehensive logging
+```bash
+docker exec ollama-arc-sycl sycl-ls
+```
+
+Expected output includes:
+```
+[opencl:gpu:0] Intel(R) OpenCL HD Graphics, Intel(R) Arc(TM) A770 Graphics ...
+[level_zero:gpu:0] Intel(R) Level-Zero, Intel(R) Arc(TM) A770 Graphics ...
+```
 
 ---
 
-**Operations Guide Complete** ✅  
-**Last Updated**: July 30, 2025  
-**Version**: 2.0  
-**Status**: Production Ready
+## Model Management
+
+### Required Models
+
+| Model | VRAM | Used By |
+|-------|------|---------|
+| `llama3.1:8b` | ~4.7GB | benchmarks |
+| `phi3:mini` | ~2.3GB | legacy |
+| `qwen3:8b` | ~4.9GB | base for qwen3:8b-nothink |
+| `qwen3:8b-nothink` | ~4.9GB | ha_boss, opn_boss, general use |
+
+```bash
+./manage.sh pull-models        # Pull all + create qwen3:8b-nothink in one step
+./manage.sh create-models      # Re-run Modelfile creation only (if models already pulled)
+```
+
+### Custom Models (Modelfiles)
+
+`models/Modelfile.qwen3-8b-nothink` — derives from `qwen3:8b` with `PARAMETER think false`.
+
+```bash
+./manage.sh create-models      # Registers qwen3:8b-nothink from the Modelfile
+```
+
+To override thinking per-prompt:
+```
+/think      # Enable chain-of-thought for this prompt
+/no_think   # Disable chain-of-thought for this prompt
+```
+
+### Chat
+
+```bash
+./manage.sh chat qwen3:8b-nothink    # Fast, no thinking tokens
+./manage.sh chat qwen3:8b            # Full reasoning mode
+./manage.sh chat llama3.1:8b         # Clean, non-reasoning
+```
+
+Or use the safe-chat script (retry logic, model validation, logging):
+```bash
+./scripts/safe-chat.sh                          # Default model
+./scripts/safe-chat.sh qwen3:8b-nothink         # Specific model
+./scripts/safe-chat.sh --list                   # List available models
+./scripts/safe-chat.sh --check                  # Pre-flight checks only
+```
+
+### Benchmark
+
+Uses `llama3.1:8b` (non-reasoning model for clean tok/s measurement):
+
+```bash
+./manage.sh benchmark
+```
+
+**Do not benchmark with `qwen3:8b`** — thinking tokens inflate elapsed time and skew results.
+
+---
+
+## Monitoring
+
+```bash
+./manage.sh logs -f                    # Follow all container logs
+./scripts/monitor.sh                   # Continuous dashboard (5s refresh)
+./scripts/monitor.sh --once            # Single snapshot
+./scripts/monitor.sh --gpu             # GPU/SYCL status only
+```
+
+```bash
+# Container resource usage
+docker stats ollama-arc-sycl --no-stream
+
+# Check SYCL kernel cache
+ls -lh ~/.cache/opencl/  # host SYCL cache location
+```
+
+---
+
+## Maintenance
+
+### Update Image
+
+```bash
+./manage.sh update             # Pulls latest upstream + rebuilds sycl-fix layer + restarts
+```
+
+Or manually:
+```bash
+docker pull ollama-arc-sycl:3.3.4   # Pull new upstream if eleiton releases one
+./manage.sh build                    # Rebuild fixed image
+./manage.sh restart
+```
+
+### Cleanup
+
+```bash
+./manage.sh cleanup            # Remove project containers + prune unused images
+```
+
+### Backup
+
+```bash
+./manage.sh backup             # Backs up docker-compose.yml + .env (not model weights)
+```
+
+Model weights are stored at `MODELS_PATH=/gow/ai/ollama` and excluded from backup — re-pull with `./manage.sh pull-models`.
+
+---
+
+## Troubleshooting
+
+### Container won't start
+
+```bash
+./manage.sh logs               # Check startup errors
+docker inspect ollama-arc-sycl # Check device passthrough
+ls -la /dev/dri/               # Verify host GPU devices exist
+```
+
+### API not responding after start
+
+Normal if SYCL kernels are compiling on first model load — can take 2-5 minutes. Check logs:
+```bash
+./manage.sh logs | grep -i sycl
+```
+
+`SYCL_CACHE_PERSISTENT=1` caches compiled kernels so subsequent starts are fast.
+
+### GPU not detected (CPU fallback)
+
+```bash
+docker exec ollama-arc-sycl sycl-ls   # Should list Arc A770
+```
+
+If empty:
+- Verify `/dev/dri/card1` and `/dev/dri/renderD129` exist on host
+- Check user is in `render` and `video` groups on host
+- Try `./manage.sh build` to rebuild the fixed image
+
+### Inference is very slow
+
+Check if a reasoning model is running in thinking mode:
+```bash
+./manage.sh logs | grep "thinking"
+```
+
+Use `qwen3:8b-nothink` instead of `qwen3:8b` for normal tasks. Append `/no_think` to prompts as a per-request override.
+
+### libsycl-native-bfloat16.spv error in logs
+
+This is handled by `Dockerfile.sycl-fix` and `GGML_SYCL_F16=1`. If you see it after a fresh build:
+```bash
+./manage.sh build   # Rebuild to re-copy the SPV file from oneAPI basekit
+```
+
+---
+
+## Configuration Reference
+
+All settings in `.env`:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CONTAINER_NAME` | `ollama-arc-sycl` | Container name |
+| `GPU_CARD_DEVICE` | `/dev/dri/card1` | Arc A770 card device |
+| `GPU_RENDER_DEVICE` | `/dev/dri/renderD129` | Arc A770 render device |
+| `MODELS_PATH` | `./data/models` | Model weight storage path |
+| `OLLAMA_PORT` | `11434` | API port |
+| `OLLAMA_CONTEXT_LENGTH` | `32768` | Context window (qwen3 supports 128k) |
+| `OLLAMA_NUM_PARALLEL` | `2` | Concurrent request slots |
+| `OLLAMA_MAX_LOADED_MODELS` | `3` | Models kept warm in VRAM |
+| `OLLAMA_KV_CACHE_TYPE` | `q8_0` | KV cache quantization |
+| `OLLAMA_KEEP_ALIVE` | `5m` | Unload idle models after |
+| `OLLAMA_FLASH_ATTENTION` | `false` | Not supported by SYCL backend |
+| `ONEAPI_DEVICE_SELECTOR` | `level_zero:0` | Pin to Arc A770 (GPU 0) |
+| `SYCL_CACHE_PERSISTENT` | `1` | Cache compiled SYCL kernels |
+| `GGML_SYCL_F16` | `1` | Force F16 (BF16 SPV workaround) |

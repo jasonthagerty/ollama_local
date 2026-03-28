@@ -1,253 +1,63 @@
 services:
-    ollama-arc-optimized:
+    ollama-arc-sycl:
+        # Extends ollama-arc-sycl:3.3.4 (eleiton/ollama-intel-arc, Ollama v0.18.3)
+        # with libsycl-native-bfloat16.spv missing from upstream build.
+        # Run "docker compose build" first if ollama-arc-sycl:3.3.4 is not present:
+        #   docker build --build-context ... (see Dockerfile.sycl-fix comments)
         build:
             context: .
-            dockerfile: Dockerfile
-            args:
-                - UBUNTU_VERSION=${UBUNTU_VERSION}
-                - PYTHON_VERSION=${PYTHON_VERSION}
-                - ONEAPI_VERSION=${ONEAPI_VERSION}
-                - IPEX_VERSION=${IPEX_VERSION}
-                - INTEL_GPU=${INTEL_GPU}
-                - INTEL_DEVICE_TARGET=${INTEL_DEVICE_TARGET}
-                - DEVICE=${DEVICE}
-        container_name: ${CONTAINER_NAME}
+            dockerfile: Dockerfile.sycl-fix
+        image: ollama-arc-sycl:3.3.4-fixed
+        container_name: ${CONTAINER_NAME:-ollama-arc-sycl}
         restart: unless-stopped
 
-        # GPU and device access
+        # Arc A770 GPU device passthrough only (card1 + renderD129)
         devices:
-            - ${GPU_CARD_DEVICE}:${GPU_CARD_DEVICE}
-            - ${GPU_RENDER_DEVICE}:${GPU_RENDER_DEVICE}
+            - ${GPU_CARD_DEVICE:-/dev/dri/card1}:${GPU_CARD_DEVICE:-/dev/dri/card1}
+            - ${GPU_RENDER_DEVICE:-/dev/dri/renderD129}:${GPU_RENDER_DEVICE:-/dev/dri/renderD129}
 
-        # Environment variables from .env
         environment:
-            # Core Intel GPU settings
-            - INTEL_GPU=${INTEL_GPU}
-            - OLLAMA_INTEL_GPU=${OLLAMA_INTEL_GPU}
-            - DEVICE=${DEVICE}
-            - INTEL_DEVICE_TARGET=${INTEL_DEVICE_TARGET}
-            - DRI_PRIME=${DRI_PRIME}
-            - OLLAMA_GPU_DEVICE=${OLLAMA_GPU_DEVICE}
+            # Level Zero / SYCL GPU init
+            - OLLAMA_HOST=0.0.0.0
+            - OLLAMA_ORIGINS=${OLLAMA_ORIGINS:-http://localhost:3000,http://localhost:11434}
+            - ZES_ENABLE_SYSMAN=1
+            - ZE_ENABLE_PCI_ID_DEVICE_ORDER=${ZE_ENABLE_PCI_ID_DEVICE_ORDER:-1}
+            - ONEAPI_DEVICE_SELECTOR=${ONEAPI_DEVICE_SELECTOR:-level_zero:0}
+            - SYCL_CACHE_PERSISTENT=1
+            - SYCL_PI_LEVEL_ZERO_USE_IMMEDIATE_COMMANDLISTS=1
+            - UR_L0_USE_IMMEDIATE_COMMANDLISTS=1
+            # Use F16 instead of BF16 — avoids missing libsycl-native-bfloat16.spv
+            - GGML_SYCL_F16=1
+            - no_proxy=localhost,127.0.0.1
 
-            # Level Zero and OneAPI configuration
-            - ONEAPI_DEVICE_SELECTOR=${ONEAPI_DEVICE_SELECTOR}
-            - SYCL_DEVICE_FILTER=${SYCL_DEVICE_FILTER}
-            - ZES_ENABLE_SYSMAN=${ZES_ENABLE_SYSMAN}
-            - ZE_ENABLE_PCI_ID_DEVICE_ORDER=${ZE_ENABLE_PCI_ID_DEVICE_ORDER}
-            - ZE_FLAT_DEVICE_HIERARCHY=${ZE_FLAT_DEVICE_HIERARCHY}
-            - ZE_ENABLE_VALIDATION_LAYER=${ZE_ENABLE_VALIDATION_LAYER}
-            - ZE_ENABLE_PARAMETER_VALIDATION=${ZE_ENABLE_PARAMETER_VALIDATION}
+            # Ollama performance settings (tuned for Arc A770 16GB VRAM)
+            - OLLAMA_CONTEXT_LENGTH=${OLLAMA_CONTEXT_LENGTH:-32768}
+            - OLLAMA_NUM_PARALLEL=${OLLAMA_NUM_PARALLEL:-2}
+            - OLLAMA_FLASH_ATTENTION=false
+            - OLLAMA_KV_CACHE_TYPE=${OLLAMA_KV_CACHE_TYPE:-q8_0}
+            - OLLAMA_MAX_LOADED_MODELS=${OLLAMA_MAX_LOADED_MODELS:-3}
+            - OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE:-5m}
 
-            # SYCL performance optimizations
-            - SYCL_CACHE_PERSISTENT=${SYCL_CACHE_PERSISTENT}
-            - SYCL_CACHE_DIR=${SYCL_CACHE_DIR}
-            - SYCL_PI_LEVEL_ZERO_USE_IMMEDIATE_COMMANDLISTS=${SYCL_PI_LEVEL_ZERO_USE_IMMEDIATE_COMMANDLISTS}
-            - SYCL_PI_LEVEL_ZERO_DEVICE_SCOPE_EVENTS=${SYCL_PI_LEVEL_ZERO_DEVICE_SCOPE_EVENTS}
-            - SYCL_PI_LEVEL_ZERO_USE_COPY_ENGINE=${SYCL_PI_LEVEL_ZERO_USE_COPY_ENGINE}
-
-            # Intel Compute Runtime optimizations
-            - INTEL_COMPUTE_RUNTIME_OCL_DEBUG=${INTEL_COMPUTE_RUNTIME_OCL_DEBUG}
-            - INTEL_COMPUTE_RUNTIME_L0_DEBUG=${INTEL_COMPUTE_RUNTIME_L0_DEBUG}
-            - INTEL_COMPUTE_RUNTIME_ENABLE_KERNEL_DEBUG=${INTEL_COMPUTE_RUNTIME_ENABLE_KERNEL_DEBUG}
-            - NEO_DISABLE_MITIGATIONS=${NEO_DISABLE_MITIGATIONS}
-            - NEO_ENABLE_INDIRECT_ACCESS_DETECTION=${NEO_ENABLE_INDIRECT_ACCESS_DETECTION}
-
-            # OpenCL optimizations
-            - CL_CONFIG_CPU_FORCE_PRIVATE_MEM_SIZE=${CL_CONFIG_CPU_FORCE_PRIVATE_MEM_SIZE}
-            - CL_CONFIG_USE_VECTORIZER=${CL_CONFIG_USE_VECTORIZER}
-
-            # Ollama configuration
-            - OLLAMA_HOST=${OLLAMA_HOST}
-            - OLLAMA_ORIGINS=${OLLAMA_ORIGINS}
-            - OLLAMA_GPU_LAYERS=${OLLAMA_GPU_LAYERS}
-            - OLLAMA_NUM_PARALLEL=${OLLAMA_NUM_PARALLEL}
-            - OLLAMA_CONTEXT_LENGTH=${OLLAMA_CONTEXT_LENGTH}
-            - OLLAMA_MAX_LOADED_MODELS=${OLLAMA_MAX_LOADED_MODELS}
-            - OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE}
-            - OLLAMA_FLASH_ATTENTION=${OLLAMA_FLASH_ATTENTION}
-            - OLLAMA_KV_CACHE_TYPE=${OLLAMA_KV_CACHE_TYPE}
-            - OLLAMA_GPU_OVERHEAD=${OLLAMA_GPU_OVERHEAD}
-            - OLLAMA_MAX_VRAM=${OLLAMA_MAX_VRAM}
-            - OLLAMA_RUNNER_TIMEOUT=${OLLAMA_RUNNER_TIMEOUT}
-            - OLLAMA_GPU_MEMORY_RECLAIM=${OLLAMA_GPU_MEMORY_RECLAIM}
-
-            # IPEX-LLM optimizations
-            - IPEX_LLM_LOW_MEM=${IPEX_LLM_LOW_MEM}
-            - IPEX_LLM_NUM_CTX=${IPEX_LLM_NUM_CTX}
-            - IPEX_LLM_FORCE_GPU=${IPEX_LLM_FORCE_GPU}
-            - IPEX_LLM_GPU_MEMORY_LIMIT=${IPEX_LLM_GPU_MEMORY_LIMIT}
-
-            # Debugging and monitoring
-            - OLLAMA_DEBUG=${OLLAMA_DEBUG}
-            - OLLAMA_VERBOSE=${OLLAMA_VERBOSE}
-
-        # Port mapping
         ports:
-            - "${OLLAMA_PORT}:11434"
+            - "${OLLAMA_PORT:-11434}:11434"
 
-        # Volume mounts for persistence
         volumes:
-            - ollama_models:/root/.ollama
-            - ollama_data:/llm/data
-            - sycl_cache:${SYCL_CACHE_DIR}
-            - ${MODELS_PATH}:/llm/models:ro
+            # NVMe (f2fs/zstd) for low-latency model weight reads
+            - ${MODELS_PATH:-./data/models}:/root/.ollama
 
-        # Resource limits from .env
+        # Container runs as root; devices: block provides DRI access
+        shm_size: 16g
+
         deploy:
             resources:
                 limits:
-                    memory: ${OLLAMA_MEMORY_LIMIT}
-                reservations:
-                    memory: ${OLLAMA_MEMORY_RESERVATION}
+                    memory: 32G
+                    cpus: 8
 
-        # Security settings from .env
-        security_opt:
-            - ${SECURITY_OPT}
-
-        # Privileged access setting from .env
-        privileged: ${PRIVILEGED}
-
-        # User and group from .env
-        user: ${CONTAINER_USER}
-
-        # Health check with .env configuration
         healthcheck:
-            test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
-            interval: ${HEALTH_CHECK_INTERVAL}
-            timeout: ${HEALTH_CHECK_TIMEOUT}
-            retries: ${HEALTH_CHECK_RETRIES}
-            start_period: ${HEALTH_CHECK_START_PERIOD}
+            test: ["CMD-SHELL", "wget -qO- http://localhost:11434/api/tags >/dev/null"]
+            interval: 30s
+            timeout: 10s
+            retries: 3
+            start_period: 120s
 
-        # Logging configuration from .env
-        logging:
-            driver: ${LOG_DRIVER}
-            options:
-                max-size: ${LOG_MAX_SIZE}
-                max-file: ${LOG_MAX_FILE}
-
-        # Network configuration
-        networks:
-            - ollama-network
-
-    # Open WebUI with .env configuration
-    ollama-webui-enhanced:
-        image: ghcr.io/open-webui/open-webui:main
-        container_name: ${WEBUI_CONTAINER_NAME}
-        restart: unless-stopped
-
-        environment:
-            - OLLAMA_BASE_URL=${OLLAMA_BASE_URL}
-            - WEBUI_SECRET_KEY=${WEBUI_SECRET_KEY}
-            - WEBUI_AUTH=${WEBUI_AUTH}
-
-        ports:
-            - "${WEBUI_PORT}:8080"
-
-        volumes:
-            - open_webui_data:/app/backend/data
-
-        # Resource limits from .env
-        deploy:
-            resources:
-                limits:
-                    memory: ${WEBUI_MEMORY_LIMIT}
-
-        depends_on:
-            - ollama-arc-optimized
-
-        networks:
-            - ollama-network
-
-        # Health check
-        healthcheck:
-            test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-            interval: ${HEALTH_CHECK_INTERVAL}
-            timeout: ${HEALTH_CHECK_TIMEOUT}
-            retries: ${HEALTH_CHECK_RETRIES}
-
-    # Optional: Performance monitoring container
-    gpu-monitor:
-        build:
-            context: .
-            dockerfile: Dockerfile
-            args:
-                - UBUNTU_VERSION=${UBUNTU_VERSION}
-                - PYTHON_VERSION=${PYTHON_VERSION}
-                - ONEAPI_VERSION=${ONEAPI_VERSION}
-                - IPEX_VERSION=${IPEX_VERSION}
-                - INTEL_GPU=${INTEL_GPU}
-                - INTEL_DEVICE_TARGET=${INTEL_DEVICE_TARGET}
-                - DEVICE=${DEVICE}
-        container_name: gpu-monitor
-        restart: unless-stopped
-
-        # Same device access as main container
-        devices:
-            - ${GPU_CARD_DEVICE}:${GPU_CARD_DEVICE}
-            - ${GPU_RENDER_DEVICE}:${GPU_RENDER_DEVICE}
-
-        environment:
-            - INTEL_GPU=${INTEL_GPU}
-            - ONEAPI_DEVICE_SELECTOR=${ONEAPI_DEVICE_SELECTOR}
-
-        command: >
-            bash -c "
-              echo 'GPU Performance Monitor Started';
-              while true; do
-                echo '=== $(date) ===';
-                echo 'GPU Utilization:';
-                timeout 5s intel_gpu_top -l 2>/dev/null | head -10 || echo 'GPU monitoring not available';
-                echo '';
-                echo 'Ollama Container Stats:';
-                curl -s http://ollama-arc-optimized:11434/api/ps 2>/dev/null | jq '.' || echo 'Ollama not responding';
-                echo '';
-                sleep 30;
-              done
-            "
-
-        depends_on:
-            - ollama-arc-optimized
-
-        networks:
-            - ollama-network
-
-        profiles:
-            - monitoring
-
-# Named volumes for data persistence with .env paths
-volumes:
-    ollama_models:
-        driver: local
-        driver_opts:
-            type: none
-            o: bind
-            device: ${MODELS_PATH}
-
-    ollama_data:
-        driver: local
-        driver_opts:
-            type: none
-            o: bind
-            device: ${CONTEXTS_PATH}
-
-    sycl_cache:
-        driver: local
-        driver_opts:
-            type: none
-            o: bind
-            device: ${SYCL_CACHE_PATH}
-
-    open_webui_data:
-        driver: local
-        driver_opts:
-            type: none
-            o: bind
-            device: ${WEBUI_DATA_PATH}
-
-# Custom network with .env configuration
-networks:
-    ollama-network:
-        driver: bridge
-        ipam:
-            config:
-                - subnet: ${NETWORK_SUBNET}

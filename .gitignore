@@ -41,6 +41,7 @@ MANIFEST
 
 # Environment variables
 .env
+.env.back
 .venv
 env/
 venv/
